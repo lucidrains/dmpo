@@ -31,3 +31,20 @@ Implementation and explorations into MPO / DMPO
     url     = {https://arxiv.org/abs/1806.06920}, 
 }
 ```
+
+```bibtex
+@InProceedings{pmlr-v235-li24z,
+  title     =    {Value-Evolutionary-Based Reinforcement Learning},
+  author    =       {Li, Pengyi and Hao, Jianye and Tang, Hongyao and Zheng, Yan and Barez, Fazl},
+  booktitle =   {Proceedings of the 41st International Conference on Machine Learning},
+  pages     =    {27875--27889},
+  year      =     {2024},
+  editor    =   {Salakhutdinov, Ruslan and Kolter, Zico and Heller, Katherine and Weller, Adrian and Oliver, Nuria and Scarlett, Jonathan and Berkenkamp, Felix},
+  volume    =   {235},
+  series    =   {Proceedings of Machine Learning Research},
+  month     =    {21--27 Jul},
+  publisher =    {PMLR},
+  pdf       =   {https://raw.githubusercontent.com/mlresearch/v235/main/assets/li24z/li24z.pdf},
+  url       =   {https://proceedings.mlr.press/v235/li24z.html},
+}
+```
