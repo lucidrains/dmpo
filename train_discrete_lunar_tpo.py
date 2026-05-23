@@ -1,15 +1,16 @@
 # /// script
 # dependencies = [
+#   "accelerate",
+#   "discrete-continuous-embed-readout",
+#   "einops",
+#   "fire",
 #   "gymnasium[box2d]",
+#   "memmap-replay-buffer>=0.1.4",
+#   "moviepy",
 #   "torch",
 #   "tqdm",
-#   "memmap-replay-buffer>=0.1.4",
-#   "einops",
-#   "discrete-continuous-embed-readout",
-#   "moviepy",
-#   "fire",
-#   "accelerate",
-#   "wandb"
+#   "wandb",
+#   "x-mlps-pytorch"
 # ]
 # ///
 
@@ -31,7 +32,10 @@ from einops import rearrange, repeat, einsum
 
 from accelerate import Accelerator
 from memmap_replay_buffer import ReplayBuffer
+
 from discrete_continuous_embed_readout import Readout
+from x_mlps_pytorch import MLP
+
 import wandb
 
 # helpers
@@ -61,12 +65,7 @@ def tpo_loss(log_p, q):
 class PolicyMLP(nn.Module):
     def __init__(self, obs_dim, act_dim, hidden = 64):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(obs_dim, hidden),
-            nn.Tanh(),
-            nn.Linear(hidden, hidden),
-            nn.Tanh(),
-        )
+        self.net = MLP(obs_dim, hidden, hidden, activation = nn.Tanh(), activate_last = True)
 
         self.to_logits = Readout(num_discrete = act_dim, dim = hidden)
 
@@ -84,8 +83,8 @@ def main(
     num_iterations: int = 2_000,
     record_every_updates: int = 5,
     entropy_coef: float = 0.01,
-    cpu: bool = False,
-    use_wandb: bool = False
+    cpu: bool = True,
+    use_wandb: bool = True
 ):
     accelerator = Accelerator(cpu = cpu)
     device = accelerator.device
