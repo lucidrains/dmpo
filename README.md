@@ -60,3 +60,12 @@ Implementation and explorations into [MPO](https://arxiv.org/abs/1806.06920) / D
     url       = {https://proceedings.mlr.press/v235/li24z.html}
 }
 ```
+
+```bibtex
+@article{kaddour2026target,
+    title   = {Target Policy Optimization},
+    author  = {Kaddour, Jean},
+    journal = {arXiv preprint arXiv:2604.06159},
+    year    = {2026}
+}
+```
