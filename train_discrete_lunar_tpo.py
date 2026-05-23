@@ -192,7 +192,6 @@ def main(
         mask = seq_idx < rearrange(episode_lens, 'k -> k 1')
 
         episode_lens_float = mask.sum(dim = 1).clamp(min = 1.).float()
-        mean_len = episode_lens_float.mean()
 
         # compute target q
 
