@@ -207,7 +207,7 @@ def main(
 
             # normalize
 
-            norm_log_scores = (log_scores / episode_lens_float) * mean_len
+            norm_log_scores = log_scores / episode_lens_float
 
             q = tpo_target(norm_log_scores, u, eta)
 
@@ -223,7 +223,7 @@ def main(
             action_log_probs = rearrange(action_log_probs, 'k t 1 -> k t')
 
             log_scores = (action_log_probs * mask).sum(dim = 1)
-            norm_log_scores = (log_scores / episode_lens_float) * mean_len
+            norm_log_scores = log_scores / episode_lens_float
 
             probs = log_probs.exp()
             entropy = -(probs * log_probs).sum(dim = -1)
