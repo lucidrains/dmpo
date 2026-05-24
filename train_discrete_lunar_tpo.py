@@ -10,7 +10,8 @@
 #   "torch",
 #   "tqdm",
 #   "wandb",
-#   "x-mlps-pytorch"
+#   "x-mlps-pytorch",
+#   "x-transformers"
 # ]
 # ///
 
@@ -35,7 +36,9 @@ from memmap_replay_buffer import ReplayBuffer
 
 from discrete_continuous_embed_readout import Readout
 from x_mlps_pytorch import MLP
+from x_transformers import Decoder
 
+import numpy as np
 import wandb
 
 # helpers
@@ -65,13 +68,48 @@ def tpo_loss(log_p, q):
 class PolicyMLP(nn.Module):
     def __init__(self, obs_dim, act_dim, hidden = 64):
         super().__init__()
-        self.net = MLP(obs_dim, hidden, hidden, activation = nn.Tanh(), activate_last = True)
+        self.net = MLP(
+            obs_dim,
+            hidden,
+            hidden,
+            activation = nn.Tanh(),
+            activate_last = True
+        )
 
-        self.to_logits = Readout(num_discrete = act_dim, dim = hidden)
+        self.to_logits = Readout(
+            num_discrete = act_dim,
+            dim = hidden
+        )
 
-    def forward(self, x):
+    def forward(self, x, cache = None):
         h = self.net(x)
-        return self.to_logits(h)
+        out = self.to_logits(h)
+        return out, None
+
+# policy transformer
+
+class PolicyTransformer(nn.Module):
+    def __init__(self, obs_dim, act_dim, dim = 64, depth = 4, heads = 4, attn_dim_head = 32):
+        super().__init__()
+        self.proj_in = nn.Linear(obs_dim, dim)
+
+        self.net = Decoder(
+            dim = dim,
+            depth = depth,
+            heads = heads,
+            attn_dim_head = attn_dim_head,
+            polar_pos_emb = True
+        )
+
+        self.to_logits = Readout(
+            num_discrete = act_dim,
+            dim = dim
+        )
+
+    def forward(self, x, cache = None):
+        x = self.proj_in(x)
+        h, new_cache = self.net(x, cache = cache, return_hiddens = True)
+        return self.to_logits(h), new_cache
 
 # main
 
@@ -84,7 +122,12 @@ def main(
     record_every_updates: int = 5,
     entropy_coef: float = 0.01,
     cpu: bool = True,
-    use_wandb: bool = True
+    use_wandb: bool = True,
+    policy_type: str = 'mlp',
+    transformer_dim: int = 64,
+    transformer_depth: int = 4,
+    transformer_heads: int = 4,
+    transformer_attn_dim_head: int = 32
 ):
     accelerator = Accelerator(cpu = cpu)
     device = accelerator.device
@@ -112,7 +155,23 @@ def main(
 
     # model and optimizer
 
-    policy = PolicyMLP(obs_dim, act_dim).to(device)
+    if policy_type == 'transformer':
+        policy = PolicyTransformer(
+            obs_dim = obs_dim,
+            act_dim = act_dim,
+            dim = transformer_dim,
+            depth = transformer_depth,
+            heads = transformer_heads,
+            attn_dim_head = transformer_attn_dim_head
+        )
+    else:
+        policy = PolicyMLP(
+            obs_dim = obs_dim,
+            act_dim = act_dim
+        )
+
+    policy = policy.to(device)
+
     optimizer = Adam(policy.parameters(), lr = lr)
 
     # replay buffer
@@ -151,12 +210,14 @@ def main(
             state, _ = env.reset()
             episode_reward = 0.
             done = False
+            cache = None
 
             while not done:
-                state_t = rearrange(torch.tensor(state, dtype = torch.float32, device = device), 'd -> 1 d')
+                state_t = rearrange(torch.tensor(state, dtype = torch.float32, device = device), 'd -> 1 1 d')
 
                 with torch.no_grad():
-                    logits = policy(state_t)
+                    logits, cache = policy(state_t, cache = cache)
+                    logits = logits[:, -1, :]
                     action = policy.to_logits.sample(logits).item()
 
                 next_state, reward, term, trunc, _ = env.step(action)
@@ -195,7 +256,7 @@ def main(
         # compute target q
 
         with torch.no_grad():
-            logits = policy(states)
+            logits, _ = policy(states)
             log_probs = F.log_softmax(logits, dim = -1)
 
             action_log_probs = log_probs.gather(2, rearrange(actions, 'k t -> k t 1'))
@@ -214,7 +275,7 @@ def main(
         for epoch in range(epochs):
             optimizer.zero_grad()
 
-            logits = policy(states)
+            logits, _ = policy(states)
             log_probs = F.log_softmax(logits, dim = -1)
 
             action_log_probs = log_probs.gather(2, rearrange(actions, 'k t -> k t 1'))
