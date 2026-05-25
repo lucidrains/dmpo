@@ -327,6 +327,9 @@ def main(
             values = ema_critic(states)
             returns, advantages = calc_gae(step_rewards, values, gae_masks, gamma = gamma, lam = lam)
 
+            norm_advantages = torch.zeros_like(advantages)
+            norm_advantages[mask] = z_score(advantages[mask])
+
             logits, _ = policy(states)
             log_probs = F.log_softmax(logits, dim = -1)
 
@@ -335,7 +338,7 @@ def main(
 
             # advantage gating
 
-            advantage_gate = 2 * torch.sigmoid(advantages / current_temperature)
+            advantage_gate = 2 * torch.sigmoid(norm_advantages / current_temperature)
             gated_action_log_probs = action_log_probs * advantage_gate
 
             log_scores = (gated_action_log_probs * mask).sum(dim = 1)
@@ -362,7 +365,7 @@ def main(
 
             # advantage gating
 
-            advantage_gate = 2 * torch.sigmoid(advantages / current_temperature)
+            advantage_gate = 2 * torch.sigmoid(norm_advantages / current_temperature)
             gated_action_log_probs = action_log_probs * advantage_gate
 
             log_scores = (gated_action_log_probs * mask).sum(dim = 1)
