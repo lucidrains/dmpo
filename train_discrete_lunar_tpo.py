@@ -33,7 +33,7 @@ import torch.nn.functional as F
 from einops import rearrange, repeat, einsum
 from torch_einops_utils import masked_mean
 
-from dmpo.tpo import tpo_target, tpo_forward_kl_loss, tpo_reverse_kl_loss
+from dmpo.tpo import tpo_target, tpo_forward_kl_loss, tpo_reverse_kl_loss, tpo_js_loss
 
 from accelerate import Accelerator
 from memmap_replay_buffer import ReplayBuffer
@@ -117,7 +117,7 @@ def main(
     num_iterations: int = 2_000,
     record_every_updates: int = 5,
     entropy_coef: float = 0.01,
-    reverse_kl: bool = False,
+    divergence: str = 'forward_kl',
     cpu: bool = True,
     use_wandb: bool = True,
     policy_type: str = 'mlp',
@@ -287,7 +287,7 @@ def main(
 
             log_p = F.log_softmax(norm_log_scores, dim = -1)
 
-            tpo_loss_fn = tpo_reverse_kl_loss if reverse_kl else tpo_forward_kl_loss
+            tpo_loss_fn = dict(forward_kl = tpo_forward_kl_loss, reverse_kl = tpo_reverse_kl_loss, js = tpo_js_loss)[divergence]
             loss = tpo_loss_fn(log_p, log_q)
 
             loss = loss - entropy_coef * entropy
