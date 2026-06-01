@@ -10,6 +10,7 @@
 #   "memmap-replay-buffer>=0.1.4",
 #   "moviepy",
 #   "torch",
+#   "torch-einops-utils",
 #   "tqdm",
 #   "wandb",
 #   "x-mlps-pytorch",
@@ -34,6 +35,9 @@ from torch.nn import Module
 from torch.optim import Adam
 
 from einops import rearrange, repeat, einsum
+from torch_einops_utils import masked_mean
+
+from dmpo.tpo import tpo_target, tpo_forward_kl_loss, tpo_reverse_kl_loss
 
 from accelerate import Accelerator
 from memmap_replay_buffer import ReplayBuffer
@@ -59,14 +63,6 @@ def divisible_by(num, den):
 
 def z_score(t, eps = 1e-8):
     return (t - t.mean()) / (t.std(unbiased = False) + eps)
-
-# tpo functions
-
-def tpo_target(log_scores, u, eta = 1.0):
-    return (F.log_softmax(log_scores, dim = -1) + u / eta).softmax(dim = -1)
-
-def tpo_loss(log_p, q):
-    return -einsum(q, log_p, '... k, ... k -> ...').mean()
 
 def calc_gae(rewards, values, masks, gamma = 0.99, lam = 0.95):
     assert values.shape[-1] == rewards.shape[-1]
@@ -160,6 +156,7 @@ def main(
     record_every_updates: int = 5,
     entropy_coef: float = 0.01,
     critic_loss_weight: float = 0.5,
+    reverse_kl: bool = False,
     cpu: bool = True,
     use_wandb: bool = True,
     policy_type: str = 'mlp',
@@ -347,7 +344,7 @@ def main(
 
             norm_log_scores = log_scores / episode_lens_float
 
-            q = tpo_target(norm_log_scores, u, eta)
+            log_q = tpo_target(norm_log_scores, u, eta)
 
         # gradient epochs
 
@@ -377,10 +374,12 @@ def main(
             # scale entropy by advantage gate
             entropy = entropy * advantage_gate
 
-            entropy = (entropy * mask).sum() / mask.sum().clamp(min = 1.)
+            entropy = masked_mean(entropy, mask)
 
             log_p = F.log_softmax(norm_log_scores, dim = -1)
-            pi_loss = tpo_loss(log_p, q)
+
+            tpo_loss_fn = tpo_reverse_kl_loss if reverse_kl else tpo_forward_kl_loss
+            pi_loss = tpo_loss_fn(log_p, log_q)
 
             loss = pi_loss + critic_loss_weight * v_loss - entropy_coef * entropy
 

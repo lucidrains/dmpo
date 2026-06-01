@@ -69,3 +69,15 @@ Implementation and explorations into [MPO](https://arxiv.org/abs/1806.06920) / D
     year    = {2026}
 }
 ```
+
+```bibtex
+@misc{qu2026listwisepolicyoptimizationgroupbased,
+    title   = {Listwise Policy Optimization: Group-based RLVR as Target-Projection on the LLM Response Simplex},
+    author  = {Yun Qu and Qi Wang and Yixiu Mao and Heming Zou and Yuhang Jiang and Yingyue Li and Wutong Xu and Lizhou Cai and Weijie Liu and Clive Bai and Kai Yang and Yangkun Chen and Saiyong Yang and Xiangyang Ji},
+    year    = {2026},
+    eprint  = {2605.06139},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG},
+    url     = {https://arxiv.org/abs/2605.06139},
+}
+```
