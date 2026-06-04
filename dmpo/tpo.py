@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections import deque, namedtuple
 from tqdm import tqdm
 
@@ -153,11 +155,11 @@ class GymEnvironment(Module):
                 done = terminated or truncated
 
                 store_kwargs = dict(state = state)
-                
+
                 if self.is_discrete:
                     t = action_tensor[0] if self.is_continuous else action_tensor
                     store_kwargs['action_discrete'] = t.item()
-                    
+
                 if self.is_continuous:
                     t = action_tensor[1] if self.is_discrete else action_tensor
                     store_kwargs['action_continuous'] = t.cpu().numpy()
@@ -196,6 +198,7 @@ class TPO(Module):
         entropy_coef = 0.01,
         divergence = 'forward_kl',
         reward_moving_average_len = 20,
+        accelerator: Accelerator | None = None,
         cpu = False,
         on_result = None,
         **readout_kwargs
@@ -230,7 +233,7 @@ class TPO(Module):
             action_fields['action_discrete'] = 'int'
             num_discrete_categories = tuple(action_num_discrete) if is_multi else None
             self.num_discrete_logits = sum(action_num_discrete) if is_multi else action_num_discrete
-            
+
         if self.has_continuous:
             action_fields['action_continuous'] = ('float', (action_num_continuous,))
 
@@ -261,7 +264,11 @@ class TPO(Module):
 
         self.actor = actor
 
-        self.accelerator = Accelerator(cpu = cpu)
+        if not exists(accelerator):
+            accelerator = Accelerator(cpu = cpu)
+
+        self.accelerator = accelerator
+
         self.device = self.accelerator.device
 
         if exists(optim):
@@ -314,22 +321,23 @@ class TPO(Module):
 
     def forward(
         self,
-        num_iterations = 2000
+        num_iterations = 2000,
+        disable_pbar = False
     ):
         device = self.device
         recent_rewards = deque(maxlen = self.reward_moving_average_len)
-        pbar = tqdm(range(num_iterations), desc = 'tpo training')
+        pbar = tqdm(range(num_iterations), desc = 'tpo training', disable = disable_pbar or num_iterations == 1)
 
         for it in pbar:
-            
+
             # get rollout
-            
+
             data = self.environment(self.actor)
 
             # unpack data
 
             states = data['state']
-            
+
             if 'action' in data:
                 actions = data['action']
             elif self.has_discrete and self.has_continuous:
