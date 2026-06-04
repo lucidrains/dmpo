@@ -36,7 +36,8 @@ def main(
     divergence: str = 'forward_kl',
     record_every: int = 5,
     continuous: bool = False,
-    max_episode_steps: int = 500
+    max_episode_steps: int = 500,
+    oob_penalty_weight: float = 0.
 ):
     # discrete: 4 actions -> 4 logits
     # continuous: 2 actions -> 4 logits (mean + log_var per action)
@@ -48,6 +49,7 @@ def main(
 
     mode = 'continuous' if continuous else 'discrete'
     video_folder = f'./lunar-recordings-tpo-wrapper-{mode}'
+    buffer_folder = f'./tpo_buffer_wrapper_{mode}'
     shutil.rmtree(video_folder, ignore_errors = True)
 
     env = gym.make('LunarLander-v3', continuous = continuous, render_mode = 'rgb_array')
@@ -59,7 +61,8 @@ def main(
     )
 
     tpo_kwargs = dict(
-        action_num_continuous = num_actions
+        action_num_continuous = num_actions,
+        action_clip_range = (-1.0, 1.0)
     ) if continuous else dict(
         action_num_discrete = num_actions
     )
@@ -68,6 +71,8 @@ def main(
         actor,
         environment = env,
         max_episode_steps = max_episode_steps,
+        oob_penalty_weight = oob_penalty_weight,
+        buffer_folder = buffer_folder,
         epochs = epochs,
         group_size = group_size,
         lr = lr,

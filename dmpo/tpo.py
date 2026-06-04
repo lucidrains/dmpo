@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque, namedtuple
 from tqdm import tqdm
 
+import numpy as np
 import torch
 from torch.nn import Module
 from torch.optim import Adam
@@ -76,6 +77,8 @@ class GymEnvironment(Module):
         group_size = 64,
         max_timesteps = None,
         max_episode_steps = None,
+        action_clip_range = None,
+        oob_penalty_weight = 0.,
         buffer_folder = './tpo_buffer',
         overwrite_buffer_on_start = True
     ):
@@ -83,6 +86,8 @@ class GymEnvironment(Module):
         self.env = env
         self.readout = readout
         self.max_episode_steps = max_episode_steps
+        self.action_clip_range = action_clip_range
+        self.oob_penalty_weight = oob_penalty_weight
 
         self.is_discrete = is_discrete
         self.is_continuous = is_continuous
@@ -126,14 +131,25 @@ class GymEnvironment(Module):
         return ((discrete_tensor // self.divisors.to(discrete_tensor.device)) % self.categories.to(discrete_tensor.device)).cpu().numpy()
 
     def action_to_env(self, action_tensor):
-        if self.is_continuous and not self.is_discrete:
-            return action_tensor.cpu().numpy()
+        oob_amount = 0.
 
         if self.is_discrete and not self.is_continuous:
-            return self.get_discrete_env_action(action_tensor)
+            return self.get_discrete_env_action(action_tensor), oob_amount
 
-        discrete_tensor, continuous_tensor = action_tensor
-        return (self.get_discrete_env_action(discrete_tensor), continuous_tensor.cpu().numpy())
+        is_mixed = self.is_discrete and self.is_continuous
+        continuous_tensor = action_tensor[1] if is_mixed else action_tensor
+        action = continuous_tensor.cpu().numpy()
+
+        if exists(self.action_clip_range):
+            min_val, max_val = self.action_clip_range
+            oob_amount = np.maximum(0., action - max_val) + np.maximum(0., min_val - action)
+            oob_amount = oob_amount.sum()
+            action = np.clip(action, min_val, max_val)
+
+        if is_mixed:
+            return (self.get_discrete_env_action(action_tensor[0]), action), oob_amount
+
+        return action, oob_amount
 
     def forward(self, actor):
         device = next(actor.parameters()).device
@@ -152,9 +168,13 @@ class GymEnvironment(Module):
                     logits = self.maybe_reshape_logits(actor(state_t))
                     action_tensor = self.readout.sample(logits)
 
-                action = self.action_to_env(action_tensor)
+                action, oob_amount = self.action_to_env(action_tensor)
 
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
+
+                if self.oob_penalty_weight > 0.:
+                    reward -= oob_amount * self.oob_penalty_weight
+
                 step += 1
 
                 if exists(self.max_episode_steps) and step >= self.max_episode_steps:
@@ -196,6 +216,8 @@ class TPO(Module):
         overwrite_buffer_on_start = True,
         max_timesteps = None,
         max_episode_steps = None,
+        action_clip_range = None,
+        oob_penalty_weight = 0.,
         epochs = 4,
         group_size = 64,
         optim = None,
@@ -262,6 +284,8 @@ class TPO(Module):
                 group_size = group_size,
                 max_timesteps = max_timesteps,
                 max_episode_steps = max_episode_steps,
+                action_clip_range = action_clip_range,
+                oob_penalty_weight = oob_penalty_weight,
                 buffer_folder = buffer_folder,
                 overwrite_buffer_on_start = overwrite_buffer_on_start
             )

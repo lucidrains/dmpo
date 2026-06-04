@@ -124,17 +124,19 @@ def main(
     transformer_dim: int = 64,
     transformer_depth: int = 4,
     transformer_heads: int = 4,
-    transformer_attn_dim_head: int = 32
+    transformer_attn_dim_head: int = 32,
+    repulsion_alpha: float = 0.0,
+    wandb_project: str = 'discrete-lunar-tpo-repulsion'
 ):
     accelerator = Accelerator(cpu = cpu)
     device = accelerator.device
 
     if use_wandb:
-        wandb.init(project = 'discrete-lunar-tpo', config = locals())
+        wandb.init(project = wandb_project, name = f'repulsion_alpha_{repulsion_alpha}', config = locals())
 
     # env
 
-    video_folder = './lunar-recordings'
+    video_folder = f'./lunar-recordings-alpha-{repulsion_alpha}'
 
     if os.path.exists(video_folder):
         shutil.rmtree(video_folder)
@@ -173,7 +175,7 @@ def main(
 
     # replay buffer
 
-    buffer_folder = './tpo_buffer'
+    buffer_folder = f'./tpo_buffer_alpha_{repulsion_alpha}'
 
     if os.path.exists(buffer_folder):
         shutil.rmtree(buffer_folder)
@@ -265,7 +267,8 @@ def main(
 
             norm_log_scores = log_scores / episode_lens_float
 
-            log_q = tpo_target(norm_log_scores, u, eta)
+            log_q_pos = tpo_target(norm_log_scores, u, eta)
+            log_q_neg = tpo_target(norm_log_scores, -u, eta)
 
         # gradient epochs
 
@@ -288,7 +291,11 @@ def main(
             log_p = F.log_softmax(norm_log_scores, dim = -1)
 
             tpo_loss_fn = dict(forward_kl = tpo_forward_kl_loss, reverse_kl = tpo_reverse_kl_loss, js = tpo_js_loss)[divergence]
-            loss = tpo_loss_fn(log_p, log_q)
+
+            loss_pos = tpo_loss_fn(log_p, log_q_pos)
+            loss_neg = -tpo_loss_fn(log_p, log_q_neg)
+
+            loss = (1 - repulsion_alpha) * loss_pos + repulsion_alpha * loss_neg
 
             loss = loss - entropy_coef * entropy
 
@@ -300,6 +307,8 @@ def main(
                 iter = it,
                 reward = avg_reward,
                 loss = loss.item(),
+                loss_pos = loss_pos.item(),
+                loss_neg = loss_neg.item(),
                 entropy = entropy.item()
             ))
 
