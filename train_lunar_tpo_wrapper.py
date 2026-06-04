@@ -35,7 +35,8 @@ def main(
     entropy_coef: float = 0.01,
     divergence: str = 'forward_kl',
     record_every: int = 5,
-    continuous: bool = False
+    continuous: bool = False,
+    max_episode_steps: int = 500
 ):
     # discrete: 4 actions -> 4 logits
     # continuous: 2 actions -> 4 logits (mean + log_var per action)
@@ -66,6 +67,7 @@ def main(
     tpo = TPO(
         actor,
         environment = env,
+        max_episode_steps = max_episode_steps,
         epochs = epochs,
         group_size = group_size,
         lr = lr,

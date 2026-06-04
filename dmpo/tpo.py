@@ -75,12 +75,14 @@ class GymEnvironment(Module):
         num_discrete_logits = None,
         group_size = 64,
         max_timesteps = None,
+        max_episode_steps = None,
         buffer_folder = './tpo_buffer',
         overwrite_buffer_on_start = True
     ):
         super().__init__()
         self.env = env
         self.readout = readout
+        self.max_episode_steps = max_episode_steps
 
         self.is_discrete = is_discrete
         self.is_continuous = is_continuous
@@ -141,6 +143,7 @@ class GymEnvironment(Module):
             state, _ = self.env.reset()
             episode_reward = 0.
             done = False
+            step = 0
 
             while not done:
                 state_t = torch.tensor(state, dtype = torch.float32, device = device)
@@ -152,6 +155,11 @@ class GymEnvironment(Module):
                 action = self.action_to_env(action_tensor)
 
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
+                step += 1
+
+                if exists(self.max_episode_steps) and step >= self.max_episode_steps:
+                    truncated = True
+
                 done = terminated or truncated
 
                 store_kwargs = dict(state = state)
@@ -187,6 +195,7 @@ class TPO(Module):
         buffer_folder = './tpo_buffer',
         overwrite_buffer_on_start = True,
         max_timesteps = None,
+        max_episode_steps = None,
         epochs = 4,
         group_size = 64,
         optim = None,
@@ -252,6 +261,7 @@ class TPO(Module):
                 num_discrete_logits = self.num_discrete_logits,
                 group_size = group_size,
                 max_timesteps = max_timesteps,
+                max_episode_steps = max_episode_steps,
                 buffer_folder = buffer_folder,
                 overwrite_buffer_on_start = overwrite_buffer_on_start
             )
