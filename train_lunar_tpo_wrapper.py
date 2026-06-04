@@ -1,23 +1,26 @@
-from functools import partial
-
 # /// script
 # dependencies = [
+#     "dmpo",
 #     "fire",
 #     "gymnasium[box2d]",
+#     "gymnasium[other]",
 #     "tqdm",
 #     "x-mlps-pytorch>=0.2.0"
 # ]
 # ///
 
+
 import os
-import shutil
 os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+
+import shutil
+from functools import partial
 
 import fire
 import gymnasium as gym
 
+from dmpo import TPO
 from x_mlps_pytorch.residual_normed_mlp import ResidualNormedMLP
-from dmpo.tpo import TPO
 
 def divisible_by(x, n):
     return (x % n) == 0
