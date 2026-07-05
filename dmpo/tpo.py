@@ -78,7 +78,6 @@ class GymEnvironment(Module):
         max_timesteps = None,
         max_episode_steps = None,
         action_clip_range = None,
-        oob_penalty_weight = 0.,
         buffer_folder = './tpo_buffer',
         overwrite_buffer_on_start = True
     ):
@@ -87,7 +86,6 @@ class GymEnvironment(Module):
         self.readout = readout
         self.max_episode_steps = max_episode_steps
         self.action_clip_range = action_clip_range
-        self.oob_penalty_weight = oob_penalty_weight
 
         self.is_discrete = is_discrete
         self.is_continuous = is_continuous
@@ -131,25 +129,19 @@ class GymEnvironment(Module):
         return ((discrete_tensor // self.divisors.to(discrete_tensor.device)) % self.categories.to(discrete_tensor.device)).cpu().numpy()
 
     def action_to_env(self, action_tensor):
-        oob_amount = 0.
-
         if self.is_discrete and not self.is_continuous:
-            return self.get_discrete_env_action(action_tensor), oob_amount
+            return self.get_discrete_env_action(action_tensor)
 
-        is_mixed = self.is_discrete and self.is_continuous
-        continuous_tensor = action_tensor[1] if is_mixed else action_tensor
+        continuous_tensor = action_tensor[1] if self.is_discrete else action_tensor
         action = continuous_tensor.cpu().numpy()
 
         if exists(self.action_clip_range):
-            min_val, max_val = self.action_clip_range
-            oob_amount = np.maximum(0., action - max_val) + np.maximum(0., min_val - action)
-            oob_amount = oob_amount.sum()
-            action = np.clip(action, min_val, max_val)
+            action = np.clip(action, *self.action_clip_range)
 
-        if is_mixed:
-            return (self.get_discrete_env_action(action_tensor[0]), action), oob_amount
+        if self.is_discrete and self.is_continuous:
+            return (self.get_discrete_env_action(action_tensor[0]), action)
 
-        return action, oob_amount
+        return action
 
     def forward(self, actor):
         device = next(actor.parameters()).device
@@ -168,12 +160,9 @@ class GymEnvironment(Module):
                     logits = self.maybe_reshape_logits(actor(state_t))
                     action_tensor = self.readout.sample(logits)
 
-                action, oob_amount = self.action_to_env(action_tensor)
+                action = self.action_to_env(action_tensor)
 
                 next_state, reward, terminated, truncated, _ = self.env.step(action)
-
-                if self.oob_penalty_weight > 0.:
-                    reward -= oob_amount * self.oob_penalty_weight
 
                 step += 1
 
@@ -217,13 +206,12 @@ class TPO(Module):
         max_timesteps = None,
         max_episode_steps = None,
         action_clip_range = None,
-        oob_penalty_weight = 0.,
-        epochs = 4,
         group_size = 64,
         optim = None,
         optim_kwargs = dict(),
         lr = 3e-4,
         max_grad_norm = None,
+        epochs = 4,
         eta = 1.0,
         min_rewards_std = 1e-4,
         entropy_coef = 0.01,
@@ -285,7 +273,6 @@ class TPO(Module):
                 max_timesteps = max_timesteps,
                 max_episode_steps = max_episode_steps,
                 action_clip_range = action_clip_range,
-                oob_penalty_weight = oob_penalty_weight,
                 buffer_folder = buffer_folder,
                 overwrite_buffer_on_start = overwrite_buffer_on_start
             )

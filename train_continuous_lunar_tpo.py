@@ -1,8 +1,9 @@
 # /// script
 # dependencies = [
 #   "accelerate",
-#   "discrete-continuous-embed-readout",
+#   "discrete-continuous-embed-readout==0.2.12",
 #   "einops",
+#   "env-ssl-wrapper==0.0.5",
 #   "fire",
 #   "gymnasium[box2d]",
 #   "memmap-replay-buffer>=0.1.4",
@@ -33,6 +34,7 @@ from einops import rearrange, repeat, einsum
 
 from accelerate import Accelerator
 from memmap_replay_buffer import ReplayBuffer
+from env_ssl_wrapper import ActionTransformWrapper
 
 from discrete_continuous_embed_readout import Readout
 from x_mlps_pytorch import MLP
@@ -76,7 +78,8 @@ class PolicyMLP(nn.Module):
         self.to_continuous = Readout(
             num_continuous = act_dim,
             dim = hidden,
-            continuous_squashed = True
+            continuous_dist_type = 'beta',
+            continuous_dist_kwargs = dict(unimodal = True)
         )
 
     def forward(self, x, cache = None):
@@ -101,7 +104,8 @@ class PolicyTransformer(nn.Module):
         self.to_continuous = Readout(
             num_continuous = act_dim,
             dim = dim,
-            continuous_squashed = True
+            continuous_dist_type = 'beta',
+            continuous_dist_kwargs = dict(unimodal = True)
         )
 
     def forward(self, x, cache = None):
@@ -174,6 +178,11 @@ def main(
 
     readout = policy.to_continuous
 
+    env = ActionTransformWrapper(
+        env,
+        transforms = dict(rescale_from_to = (readout.get_continuous_native_range(), (-1.0, 1.0)))
+    )
+
     # replay buffer
 
     buffer_folder = './tpo_buffer_continuous'
@@ -218,12 +227,12 @@ def main(
                 with torch.no_grad():
                     dist_params, cache = policy(state_t, cache = cache)
                     dist_params = dist_params[:, -1, :]
-                    action = readout.sample(dist_params).cpu().numpy()[0]
+                    action_native = readout.sample(dist_params).cpu().numpy()[0]
 
-                next_state, reward, term, trunc, _ = env.step(action)
+                next_state, reward, term, trunc, _ = env.step(action_native)
                 done = term or trunc
 
-                buffer.store(state = state, action = action)
+                buffer.store(state = state, action = action_native)
                 episode_reward += reward
                 state = next_state
 
@@ -274,7 +283,6 @@ def main(
             optimizer.zero_grad()
 
             dist_params, _ = policy(states)
-
             action_log_probs = readout.log_prob(dist_params, actions).sum(dim = -1)
 
             log_scores = (action_log_probs * mask).sum(dim = 1)
