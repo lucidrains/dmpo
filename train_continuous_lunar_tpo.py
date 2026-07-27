@@ -9,6 +9,7 @@
 #   "memmap-replay-buffer>=0.1.4",
 #   "moviepy",
 #   "torch",
+#   "torch-einops-utils>=0.1.11",
 #   "tqdm",
 #   "wandb",
 #   "x-mlps-pytorch",
@@ -31,6 +32,7 @@ from torch.optim import Adam
 import torch.nn.functional as F
 
 from einops import rearrange, repeat, einsum
+from torch_einops_utils import masked_sum, masked_mean, lens_to_mask
 
 from accelerate import Accelerator
 from memmap_replay_buffer import ReplayBuffer
@@ -256,10 +258,7 @@ def main(
 
         # mask
 
-        max_len = states.shape[1]
-        seq_idx = repeat(torch.arange(max_len, device = device), 't -> k t', k = K)
-        mask = seq_idx < rearrange(episode_lens, 'k -> k 1')
-
+        mask = lens_to_mask(episode_lens, max_len = states.shape[1])
         episode_lens_float = mask.sum(dim = 1).clamp(min = 1.).float()
 
         # compute target q
@@ -268,8 +267,7 @@ def main(
             dist_params, _ = policy(states)
 
             action_log_probs = readout.log_prob(dist_params, actions).sum(dim = -1)
-
-            log_scores = (action_log_probs * mask).sum(dim = 1)
+            log_scores = masked_sum(action_log_probs, mask = mask, dim = 1)
 
             # normalize
 
@@ -284,12 +282,11 @@ def main(
 
             dist_params, _ = policy(states)
             action_log_probs = readout.log_prob(dist_params, actions).sum(dim = -1)
-
-            log_scores = (action_log_probs * mask).sum(dim = 1)
+            log_scores = masked_sum(action_log_probs, mask = mask, dim = 1)
             norm_log_scores = log_scores / episode_lens_float
 
             entropy = readout.entropy(dist_params).sum(dim = -1)
-            entropy = (entropy * mask).sum() / mask.sum().clamp(min = 1.)
+            entropy = masked_mean(entropy, mask = mask)
 
             log_p = F.log_softmax(norm_log_scores, dim = -1)
             loss = tpo_loss(log_p, q)
