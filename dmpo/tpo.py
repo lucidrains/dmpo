@@ -214,6 +214,8 @@ class TPO(Module):
         epochs = 4,
         eta = 1.0,
         min_rewards_std = 1e-4,
+        ema_normalize = False,
+        ema_normalize_decay = 0.99,
         entropy_coef = 0.01,
         divergence = 'forward_kl',
         reward_moving_average_len = 20,
@@ -308,6 +310,19 @@ class TPO(Module):
         self.entropy_coef = entropy_coef
         self.reward_moving_average_len = reward_moving_average_len
 
+        # batch norm style ema normalization of episode rewards
+        # - ema_normalize_decay of 0. corresponds exactly to the default within-batch z-score
+        # - running statistics seeded from the first batch
+
+        assert 0. <= ema_normalize_decay <= 1., f'ema_normalize_decay must be in [0, 1], got {ema_normalize_decay}'
+
+        self.ema_normalize = ema_normalize
+        self.ema_normalize_decay = ema_normalize_decay
+
+        self.register_buffer('reward_running_mean', torch.zeros(()))
+        self.register_buffer('reward_running_var', torch.ones(()))
+        self.register_buffer('reward_norm_updates', torch.zeros((), dtype = torch.long))
+
         assert divergence in TPO_LOSS_FNS, f'divergence must be one of {list(TPO_LOSS_FNS.keys())}'
         self.tpo_loss_fn = TPO_LOSS_FNS[divergence]
 
@@ -324,6 +339,34 @@ class TPO(Module):
         continuous_params = rearrange(continuous_logits, '... (c d) -> ... c d', c = self.num_continuous)
 
         return (discrete_logits, continuous_params)
+
+    def calculate_reward_advantages(self, rewards):
+        if self.ema_normalize:
+            batch_mean = rewards.mean()
+            batch_var = rewards.var(unbiased = False)
+
+            if self.reward_norm_updates == 0:
+                self.reward_running_mean.copy_(batch_mean)
+                self.reward_running_var.copy_(batch_var)
+            else:
+                decay = self.ema_normalize_decay
+                self.reward_running_mean.mul_(decay).add_((1. - decay) * batch_mean.item())
+                self.reward_running_var.mul_(decay).add_((1. - decay) * batch_var.item())
+
+            self.reward_norm_updates.add_(1)
+
+            if rewards.std(unbiased = False) < self.min_rewards_std:
+                return torch.zeros_like(rewards)
+
+            running_mean = self.reward_running_mean.to(rewards.device)
+            running_std = self.reward_running_var.sqrt().to(rewards.device)
+
+            return (rewards - running_mean) / (running_std + 1e-8)
+
+        if rewards.std(unbiased = False) < self.min_rewards_std:
+            return torch.zeros_like(rewards)
+
+        return z_score(rewards)
 
     def calculate_log_scores(self, states, actions, mask, episode_lens_float):
         logits = self.maybe_reshape_logits(self.actor(states))
@@ -384,10 +427,7 @@ class TPO(Module):
 
             # calculate baseline and mask
 
-            if rewards.std(unbiased = False) < self.min_rewards_std:
-                u = torch.zeros_like(rewards)
-            else:
-                u = z_score(rewards)
+            u = self.calculate_reward_advantages(rewards)
 
             mask = data.get('mask')
 
